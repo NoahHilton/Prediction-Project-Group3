@@ -1,0 +1,432 @@
+# Prediction Project
+
+---
+## Executive Summary
+
+The following details the development of a statistical model to predict physical movements based on acceloromotor data produced by a body-tracking device. The five subsequent sections of this document will describe the production of five unique models to perform these predictions, with each model being authored by a different data scientist on the team. These five models are as follows:
+
+*1. Linear Regression (proposed by Ellie Jackson)*
+
+*2. Random Forest Model (proposed by Noah Hilton)*
+
+*3. Support Vector Machine (proposed by Nelson Kingery)*
+
+*4. Classificiation and Regression Tree (proposed by Kaene Soto)*
+
+*5. Logistic Regression (proposed by David Chang)*
+
+Each section will provide the code needed to clean the data prior to analysis and to produce each model. Each section will also provide an analysis of the given model, assessing its statistical valididity and predictive power.
+
+Using these analyses, a final model will be proposed and used to predict the physical movements of 20 test subjects. This will serve as a final test of the selected model's out-of-sample predictive power.
+
+##1. Linear Regression (Ellie)
+
+##*1. Import relevant files using with read.csv function.*
+
+##Import the testing data
+testing<-read.csv("https://raw.githubusercontent.com/slevkoff/ECON386REPO/master/Prediction%20Project/testing.csv", na.strings=c("","NA"))
+View(testing)
+
+##Import the training data
+training<-read.csv("https://raw.githubusercontent.com/slevkoff/ECON386REPO/master/Prediction%20Project/training.csv", na.strings=c("","NA"))
+View(training)
+
+##**2. Prepare the data to be analyzed.**
+#Summing the NA in each column
+na<-colSums(is.na(training))
+View(na)
+
+#If more than 50% of the data in a colum has NAs or blanks then that variable was deleted 
+training_cleaned<-training[,-which(colMeans(is.na(training)) > 0.5)]
+
+#Deleting "new_window" variable
+training_cleaned$new_window<-NULL
+View(training_cleaned)
+
+#Converting Classe data into numeric data
+training_cleaned$classe <- as.character(training_cleaned$classe)
+training_cleaned$classe[which(training_cleaned$classe=="A")] <- "1"
+training_cleaned$classe[which(training_cleaned$classe=="B")] <- "2"
+training_cleaned$classe[which(training_cleaned$classe=="C")] <- "3"
+training_cleaned$classe[which(training_cleaned$classe=="D")] <- "4"
+training_cleaned$classe[which(training_cleaned$classe=="E")] <- "5"
+training_cleaned$classe <- as.numeric(training_cleaned$classe)
+
+##**3. Create a Linear Model model based on the selected variables of the training data.**
+#Split training_cleaned into "training" (70%) and "validation"(30%)
+set.seed(1234)
+ind <- sample(2,nrow(training_cleaned), replace = TRUE, prob= c(0.7, 0.3))
+tdata<-training_cleaned[ind==1,]
+vdata<-training_cleaned[ind==2,]
+
+#Transforming training_data into a data frame
+my_table<- as.data.frame.matrix(training_cleaned) 
+
+#Multiple linear regression model
+results<- lm(classe ~ . - classe , training_cleaned)
+summary(results) 
+results$coefficients
+results$residuals
+coefficients(results)
+plot(results$residuals)
+
+##**4. Use the linear model to predict the test data.**prediction in sample
+prediction<- predict(results,vdata)
+head(prediction)
+tail(prediction)
+head(vdata)
+tail(prediction)
+summary(results)
+
+# estimate the accuracy of the model 
+RSS <- c(crossprod(results$residuals))
+MSE <- RSS / length(results$residuals)
+RMSE <- sqrt(MSE)
+RMSE
+
+##Conclusion
+
+##The RMSE is the standard deviation of the unexplained varaiance which measure how far away the observed points are from the regression line. RMSE measures the spread of the residuals around the regression line and if the model is a good fit. In this case the RMSE was 0.0744 which shows that the model's dependent variable was accurately predicted by the other independent variables. Furthermore, when looking at the plot of the residuals- all residuals fall withing -.04 and .04 which is a small margin for error. 
+##Based on the summary of results, the Mutliple R-squared is .9975 which indicates the percentage of the variance in the classe (dependent) variable that the independent variables can explain collectively, which in this case is 99.75%.
+#The Adjusted R-squared is .9974 which indicates that the percentage of the variance in the classe (dependent) variable that the independent variables can explain collectively, which in this case is 99.74%, however it is adjusted for the number of predictions in the model. 
+##Additionally the residual standard error is 0.07459 which indicates the standard error around the "results" model that estimates the accuracy of the dependent variable being measured. 
+#The model has high explained variation in the classe varaible created by the other indpendent variables, however, after analyzing this model it seems as though deciding whether to classify a number such as 1.5 as an "A" movement or a "B" movement is ambigious and can lead to inaccurate predictions which is why we did not pick this model. We also did not pick this model due to the inability to having a percentage to tell us the accuracy of the model. 
+
+## 2. Random Forest (Noah)
+---
+**1. Import relevant files using the read.csv function.**
+
+These files can be pulled directly from the GitHub repository by incorporating the relevant links into the commands.
+
+```{r Import}
+RFtrain <- read.csv("https://raw.githubusercontent.com/slevkoff/ECON386REPO/master/Prediction%20Project/training.csv", header=TRUE, sep=",")
+RFtest <- read.csv("https://raw.githubusercontent.com/slevkoff/ECON386REPO/master/Prediction%20Project/testing.csv", header=TRUE, sep=",")
+```
+
+This creates and labels data frames of both the training and the test data.
+
+---
+**2. Prepare the data to be analyzed.**
+
+Here, we will segment the training data into training (70% of the data) and testing (30%) subsections to avoid memorizing the data. We will also filter out variables for which we have limited information in the training data. This will done in by part by making use of the dplyr package, which should be installed if not already on the machine.
+
+```{r Data Preparation, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+set.seed(1234)
+RFtrainingRowIndex <- sample(1:nrow(RFtrain), size=.6*nrow(RFtrain))
+RFtrainingModel <- RFtrain[RFtrainingRowIndex, ]
+RFtestModel <- RFtrain[-RFtrainingRowIndex, ]
+library(dplyr)
+RFtrainingModel2 <- RFtrainingModel %>%
+  select_if(~ !any(is.na(.)))
+colNames <- colnames(RFtrainingModel2)
+RFtraining_model_filter <- (grepl("kurtosis", colNames) |
+                      grepl("skewness", colNames) |
+                      grepl("max", colNames) |
+                      grepl("min", colNames) |
+                      grepl("amplitude_yaw", colNames))
+RFtrain_model <- RFtrainingModel2[, RFtraining_model_filter==FALSE]
+RFtrain_model <- RFtrain_model[, c(8:60)]
+```
+
+---
+**3. Create a Random Forest model based on the selected variables of the training data.**
+
+This will involve the use of the randomForest package, which should be installed if not already on the machine.
+
+```{r RF Model, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+library(randomForest)
+set.seed(123)
+RFModel <- randomForest(classe ~ ., data=RFtrain_model, ntree=500, replace=TRUE, keep.forest=TRUE)
+RFModel
+```
+
+Note that this will likely take a handful of extra moments for the machine to compute. When finished, we will have a printout of the model's key features, including its estimated out-of-bag(OOB) (i.e., out-of-sample) error rate.
+
+---
+**4. Use the generated model to predict the test data.**
+
+Next, we can use the Random Forest model generated in the previous step to predict the classification of each observation in the test data. We can then create a confusion matrix to evaluate the accuracy of these predictions (Note: this will involve the use of the caret package, which should be installed if not already on the machine.)
+
+```{r RF Predict, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+library(caret)
+RFPredict <- predict(RFModel, RFtestModel)
+confusionMatrix(data=RFPredict, ref=RFtestModel$classe, positive=NULL)
+```
+
+The confusion matrix also gives a statistical evalutaion of the model's performance against the test data. These figures paint an encouraging picture of the overall predictive power of the Random Forest model. The model has an out-of-sample accuracy of 99.32% and an associated p-value of less than 2.2e-16, meaning we can be extremely confident in the statistical significance of the model as a whole. The model's Kappa coefficient, which evaluates the model's accuracy while factoring in the influence of random chance on output agreement, is also encouraging, with a value of 0.9915. 
+
+
+
+---
+
+## 3. Support Vector Machine (Nelson)
+
+Beginning Project 
+``` {r}
+training <- read.csv("https://raw.githubusercontent.com/slevkoff/ECON386REPO/master/Prediction%20Project/training.csv", header=TRUE, sep=",")
+testing <- read.csv("https://raw.githubusercontent.com/slevkoff/ECON386REPO/master/Prediction%20Project/testing.csv", header=TRUE, sep=",")
+```
+
+```
+
+Filling and Omitting NA 
+(only trial runs, do not run)
+
+```{r}
+#train2 <- read.csv("training.csv", header=T, na.strings = c("", "NA"))
+#testing1<- na.omit(test2)
+#training1<- na.omit(train2)
+#trial 1
+
+#na_vec <- which(!complete.cases(train2))
+#training1 <- train2[-na_vec, ]
+
+#na_vec1 <- which(!complete.cases(testing))
+#testing1 <- testing[-na_vec1]
+#trial 2
+```
+
+Cleaning and Omitting NA's 
+(finalized)
+``` {r}
+testing2 <- Filter(function(x)!all(is.na(x) || is.null(x) || x == "" || x == 0), testing) 
+
+testing2$problem_id <-NULL #excluding column pobrlem id
+training2 <- training[ , colSums(is.na(training)) == 0]
+testing2names <- colnames(testing2)
+write.table(testing2names, file="testingnames.txt")
+training3names <- colnames(training2)
+write.table(training3names, file="training1names.txt")
+
+training3 <- training2[ -c(12:20,43:48,52:60,74:82) ]
+#93 to 60 variables by including everything except columns with no values 
+
+#testing 2 and training 3 are main datasets as of this point
+
+
+levels.time <- levels(training2$cvtd_timestamp)
+levels(testing2$cvtd_timestamp) <- levels.time
+levels.window <- levels(training3$new_window)
+levels(testing2$new_window) <- levels.window
+
+```
+Partitioning Data
+```{r}
+set.seed(1)
+traing4<- sample(1: nrow(training3), size=.7*nrow(training3))
+#70:30 ratio
+trainingA<- training3[traing4, ]
+testA<- training3[-traing4, ]
+
+```
+Save csv
+```{r}
+write.csv(trainingA, file="trainingclean.csv", row.names = FALSE)
+write.csv(testA, file="testingclean.csv", row.names = FALSE)
+```
+
+Installing Packages for SVM
+```{r}
+library(e1071)
+library(caret)
+```
+
+Running SVM 
+```{r}
+#model_svm<- svm(classe ~ . -X -user_name, data = training3)
+#trial1
+#mymodel <- svm(classe~. -X -user_name -cvtd_timestamp -new_window, data = training3)
+#trial2
+#mymodel1 <- svm(classe~. -X -user_name -cvtd_timestamp -new_window, data = training3, kernel="radial", gamma=1,cost=1)
+#trial3
+
+mymodel2 <- svm(classe~. -X -user_name -cvtd_timestamp -new_window, data = trainingA, kernel="radial",cost= 2^(2:9)) 
+#trial 4
+
+#cost captures cost of constraint. cost is to high then the model might store to many support vectors = over fitting vs. underfitting with a low cost. ranges = list(epsilon =seq(0,1,0.1), cost = 2(^(2:9))
+
+#tmodel<- tune(svm, classe~. -X -user_name -cvtd_timestamp -new_window, data = trainingA, ranges = list(epsilon = seq(0,1,0.1), cost = 2^(2:9))) #trial 5
+
+mymodel3 <- svm(classe~. -X -user_name -cvtd_timestamp -new_window, data = trainingA, kernel="radial",cost= 2^(2:9), cross=10) 
+#trial 6 with k-form cross validation
+
+mymodel4 <- svm(classe~. -X -user_name -cvtd_timestamp -new_window, data = trainingA, kernel="radial",cost= 2^(2:5), cross=10) 
+#trial 6 reduced cost
+
+
+#cross = 10 
+#cost = 1 ... start small (regularizing and cross validating)
+#predict with confusionMatrix that is in package in caret library
+#run, predict, then feed stored pred in confusion matrix.
+
+myprediction<- predict(mymodel2, testA, type="vector")
+#prediction1
+mycomparison<- confusionMatrix(myprediction, testA$classe)
+#comparison1
+mycomparison
+
+myprediction2<- predict(mymodel3, testA, type="vector")
+#prediction2
+mycomparison2<- confusionMatrix(myprediction2, testA$classe)
+#comparison2
+mycomparison2
+
+myprediction3<- predict(mymodel4, testA, type="vector")
+#prediction3
+mycomparison3<- confusionMatrix(myprediction3, testA$classe)
+mycomparison3
+
+#tmodel1<- tune(svm, classe~. -X -user_name -cvtd_timestamp -new_window, data = trainingA, ranges = list(epsilon = seq(0,1,0.1), cost = 2^(2:9)))
+#tuning needs work to match bigger data set
+#run time is too long
+
+
+```
+
+
+---
+
+## 4. Classification and Regression Tree (Kaene)
+
+**1. Import relevant files using the read.csv function.**
+
+These files can be pulled directly from the GitHub repository by incorporating the relevant links into the commands.
+
+````
+CARTtrain <- read.csv("https://raw.githubusercontent.com/slevkoff/ECON386REPO/master/Prediction%20Project/training.csv", header=TRUE, sep=",")
+CARTtest <- read.csv("https://raw.githubusercontent.com/slevkoff/ECON386REPO/master/Prediction%20Project/testing.csv", header=TRUE, sep=",")
+CARTtrain
+CARTtest
+View(CARTtrain)
+````
+This creates and labels data frames of both the training and the test data.
+
+---
+**2. Prepare the data to be analyzed.**
+
+Here, we will segment the training data into training (70% of the data) and testing (30%) subsections to avoid memorizing the data. We will also filter out variables for which we have limited information in the training data. This will done in by part by making use of the dplyr package, which should be installed if not already on the machine.
+
+````
+set.seed(8224)
+CARTtrainingRowIndex <- sample(1:nrow(CARTtrain), size=.7*nrow(CARTtrain))
+CARTtrainingModel <- CARTtrain[CARTtrainingRowIndex, ]
+CARTtestModel <- CARTtrain[-CARTtrainingRowIndex, ]
+library(dplyr)
+CARTtrainingModel2 <- CARTtrainingModel %>%
+  select_if(~ !any(is.na(.)))
+colNames <- colnames(CARTtrainingModel2)
+CARTtraining_model_filter <- (grepl("kurtosis", colNames) |
+                              grepl("skewness", colNames) |
+                              grepl("max", colNames) |
+                              grepl("min", colNames) |
+                              grepl("amplitude_yaw", colNames))
+CARTtrain_model <- CARTtrainingModel2[, CARTtraining_model_filter==FALSE]
+CARTtrain_model <- CARTtrain_model[, c(8:60)]
+View(CARTtrain_model)
+View(CARTtestModel)
+CARTtestModel2<- CARTtestModel %>%
+  select_if(~!any(is.na(.)))
+colNames<-colnames(CARTtestModel2)
+CARTtest_model_filter<- (grepl("kurtosis",colNames) |
+                         grepl("skewness",colNames) |
+                         grepl("max",colNames) |
+                         grepl("min",colNames) |
+                         grepl("amplitude_yaw",colNames))
+CARTtest_model<-CARTtestModel2[,CARTtest_model_filter==FALSE]
+CARTtest_model<- CARTtest_model [,c(8:60)]
+View(CARTtest_model)
+
+````
+
+---
+**3. Create a CART model based on the selected variables of the training data.**
+This will involve the use of the rpart package, which should be installed if not already on the machine.
+
+
+````
+install.packages("rpart")
+
+library(rpart)
+str(CARTtrain_model)
+?rpart
+M1<- rpart(classe ~ ., data=RFtrain_model, method="class")
+M1
+summary(M1)
+````
+
+---
+**4. Use the generated model to predict the test data.**
+
+Next, we can use the CART model generated in the previous step to predict the classification of each observation in the test data we set aside earlier.
+We can then create a confusion matrix to evaluate the accuracy of these predictions
+
+
+````
+P1 <- predict(M1, CARTtest_model, type="class")
+P1
+table(CARTtest_model$classe, predicted= P1)
+````
+NOTE: We can then quickly add up the correctly predicted estimation within the confusion matrix and divide them by the total number of observations to get the accuracy of the model
+````
+1425+673+869+631+777
+4375+56+45+54+31+203+102+88+53+33+51+61+34+65+70+167+89+66+83+94+67
+percentAccuracy<-4375/5887
+percentAccuracy
+````
+The model has an out-of-sample accuracy of 74.32%
+
+
+
+---
+
+## 5. Logistic Regression (David)
+
+# Importing data into R and setting the working directory
+
+Dataset <- read.csv("https://raw.githubusercontent.com/slevkoff/ECON386REPO/master/Prediction%20Project/training.csv", header=T, na.strings=c("","NA"))
+
+## Cleaning the Data
+
+cldata<-Dataset[ , colSums(is.na(Dataset_2.0)) == 0]
+
+# Setting up the Training data, Testing Data, and Validation Data
+inTrain <- createDataPartition(y=cldata$classe, p=.70, list = FALSE) 
+TrainingSet<-cldata[inTrain,]  
+HoldoutData<-cldata[-inTrain,] 
+#partitions the 30% holdout set into 50/50 split of Testing and Validation sets
+inVal<-createDataPartition(y=HoldoutData$classe, p=.50, list = FALSE)
+#creates validation set
+ValidationSet<-HoldoutData[inVal,]
+#creates test set (uncomtaminated)
+TestSet<-HoldoutData[-inVal,]
+# Trainging the model
+glmresults<-glm(classe ~ .,  family =binomial(link='logit'),TrainingSet)
+# Testing the data with the test set in the training data
+predict(glmresults,TestSet,type = c("response"), se.fit = FALSE )
+
+#Validating model
+pr.lm <- predict.lm (glmresults, TestSet) # just assignment
+
+MSE.lm <- sum((pr.lm - TestSet$classe )^2)/nrow(TestSet)
+
+# Import Testing Data
+TestData <- read.csv("https://raw.githubusercontent.com/slevkoff/ECON386REPO/master/Prediction%20Project/testing.csv", header=T, na.strings=c("","NA"))
+testdata<-TestData[ , colSums(is.na(Dataset_2.0)) == 0]
+# Test the model with Testing Data
+predict(glmresults,testdata,type = c("response"), se.fit = FALSE )
+
+
+---
+
+## Model Selection
+
+Ultimately, we decided that the random forest model provided the best predictor of any out-of-sample data to come. It had the highest out-of-sample accuracy of the five models while shaving a substantial amount of computing power off of that required by the second-most successful model, the support vector machine. Based on that combination of accuracy and efficiency, we felt it best to use the random forest model to anchor our predictions moving forward. In the case of the twenty observations already provided, the classifications for those data points are expected to be as follows:
+
+```{r Data Prediction, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+RFPredictNew <- predict(RFModel, RFtest)
+RFPredictNew
+```
+
+
+
+---
